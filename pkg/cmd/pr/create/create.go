@@ -518,6 +518,7 @@ func initDefaultTitleBody(ctx CreateContext, state *shared.IssueMetadataState, u
 	return nil
 }
 
+// TODO: Replace with the finder's PullRequestRefs struct
 // trackingRef represents a ref for a remote tracking branch.
 type trackingRef struct {
 	remoteName string
@@ -685,7 +686,9 @@ func NewCreateContext(opts *CreateOptions) (*CreateContext, error) {
 		return nil, err
 	}
 	if isPushEnabled {
-		// determine whether the head branch is already pushed to a remote
+		// TODO: This doesn't respect the @{push} revision resolution or triagular workflows assembled with
+		// remote.pushDefault, or branch.<branchName>.pushremote config settings. The finder's ParsePRRefs
+		// may be able to replace this function entirely.
 		if trackingRef, found := tryDetermineTrackingRef(gitClient, remotes, headBranch, headBranchConfig); found {
 			isPushEnabled = false
 			if r, err := remotes.FindByName(trackingRef.remoteName); err == nil {

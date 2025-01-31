@@ -1515,7 +1515,7 @@ func Test_createRun(t *testing.T) {
 			},
 			customBranchConfig: true,
 			cmdStubs: func(cs *run.CommandStubber) {
-				cs.Register(`git config --get-regexp \^branch\\\.task1\\\.\(remote\|merge\|gh-merge-base\)\$`, 0, heredoc.Doc(`
+				cs.Register(`git config --get-regexp \^branch\\\.task1\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, heredoc.Doc(`
 					branch.task1.remote origin
 					branch.task1.merge refs/heads/task1
 					branch.task1.gh-merge-base feature/feat2`)) // ReadBranchConfig
@@ -1549,7 +1549,7 @@ func Test_createRun(t *testing.T) {
 			defer cmdTeardown(t)
 			cs.Register(`git status --porcelain`, 0, "")
 			if !tt.customBranchConfig {
-				cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|gh-merge-base\)\$`, 0, "")
+				cs.Register(`git config --get-regexp \^branch\\\..+\\\.\(remote\|merge\|pushremote\|gh-merge-base\)\$`, 0, "")
 			}
 
 			if tt.cmdStubs != nil {
