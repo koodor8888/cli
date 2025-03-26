@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
 	ghContext "github.com/cli/cli/v2/context"
 	"github.com/cli/cli/v2/git"
@@ -51,7 +52,15 @@ func NewCmdStatus(f *cmdutil.Factory, runF func(*StatusOptions) error) *cobra.Co
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show status of relevant pull requests",
-		Args:  cmdutil.NoArgsQuoteReminder,
+		Long: heredoc.Docf(`
+			Show status of relevant pull requests.
+
+			The status shows a summary of pull requests that includes information such as
+			pull request number, title, CI checks, reviews, etc.
+
+			To see more details of CI checks, run %[1]sgh pr checks%[1]s.
+		`, "`"),
+		Args: cmdutil.NoArgsQuoteReminder,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// support `-R, --repo` override
 			opts.BaseRepo = f.BaseRepo
@@ -87,6 +96,7 @@ func statusRun(opts *StatusOptions) error {
 	var currentHeadRefBranchName string
 
 	if !opts.HasRepoOverride {
+		// We must be in a repo without the override
 		currentBranchName, err = opts.Branch()
 		if err != nil && !errors.Is(err, git.ErrNotOnAnyBranch) {
 			return fmt.Errorf("could not query for pull request for current branch: %w", err)

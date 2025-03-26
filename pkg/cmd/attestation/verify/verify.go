@@ -195,6 +195,9 @@ func NewVerifyCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Command 
 	verifyCmd.MarkFlagsMutuallyExclusive("cert-identity", "cert-identity-regex", "signer-repo", "signer-workflow")
 	verifyCmd.Flags().StringVarP(&opts.OIDCIssuer, "cert-oidc-issuer", "", verification.GitHubOIDCIssuer, "Issuer of the OIDC token")
 	verifyCmd.Flags().StringVarP(&opts.Hostname, "hostname", "", "", "Configure host to use")
+	verifyCmd.Flags().StringVarP(&opts.SignerDigest, "signer-digest", "", "", "Digest associated with the signer workflow")
+	verifyCmd.Flags().StringVarP(&opts.SourceRef, "source-ref", "", "", "Ref associated with the source workflow")
+	verifyCmd.Flags().StringVarP(&opts.SourceDigest, "source-digest", "", "", "Digest associated with the source workflow")
 
 	return verifyCmd
 }
@@ -221,7 +224,7 @@ func runVerify(opts *Options) error {
 
 	attestations, logMsg, err := getAttestations(opts, *artifact)
 	if err != nil {
-		if ok := errors.Is(err, api.ErrNoAttestations{}); ok {
+		if ok := errors.Is(err, api.ErrNoAttestationsFound); ok {
 			opts.Logger.Printf(opts.Logger.ColorScheme.Red("✗ No attestations found for subject %s\n"), artifact.DigestWithAlg())
 			return err
 		}
@@ -236,7 +239,7 @@ func runVerify(opts *Options) error {
 	filteredAttestations := verification.FilterAttestations(ec.PredicateType, attestations)
 	if len(filteredAttestations) == 0 {
 		opts.Logger.Printf(opts.Logger.ColorScheme.Red("✗ No attestations found with predicate type: %s\n"), opts.PredicateType)
-		return err
+		return fmt.Errorf("no matching predicate found")
 	}
 	attestations = filteredAttestations
 
