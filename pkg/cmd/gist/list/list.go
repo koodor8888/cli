@@ -61,10 +61,10 @@ func NewCmdList(f *cmdutil.Factory, runF func(*ListOptions) error) *cobra.Comman
 			No highlights or other color is printed when output is redirected.
 		`, "`"),
 		Example: heredoc.Doc(`
-			# list all secret gists from your user account
+			# List all secret gists from your user account
 			$ gh gist list --secret
 
-			# find all gists from your user account mentioning "octo" anywhere
+			# Find all gists from your user account mentioning "octo" anywhere
 			$ gh gist list --filter octo --include-content
 		`),
 		Aliases: []string{"ls"},
@@ -206,7 +206,7 @@ func printTable(io *iostreams.IOStreams, gists []shared.Gist, filter *regexp.Reg
 			tableprinter.WithColor(highlightFilesFunc(&gist)),
 		)
 		tp.AddField(visibility, tableprinter.WithColor(visColor))
-		tp.AddTimeField(time.Now(), gist.UpdatedAt, cs.Gray)
+		tp.AddTimeField(time.Now(), gist.UpdatedAt, cs.Muted)
 		tp.EndRow()
 	}
 

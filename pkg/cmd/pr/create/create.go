@@ -879,37 +879,37 @@ func renderPullRequestPlain(w io.Writer, params map[string]interface{}, state *s
 }
 
 func renderPullRequestTTY(io *iostreams.IOStreams, params map[string]interface{}, state *shared.IssueMetadataState) error {
-	iofmt := io.ColorScheme()
+	cs := io.ColorScheme()
 	out := io.Out
 
 	fmt.Fprint(out, "Would have created a Pull Request with:\n")
-	fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Title"), params["title"].(string))
-	fmt.Fprintf(out, "%s: %t\n", iofmt.Bold("Draft"), params["draft"])
-	fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Base"), params["baseRefName"])
-	fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Head"), params["headRefName"])
+	fmt.Fprintf(out, "%s: %s\n", cs.Bold("Title"), params["title"].(string))
+	fmt.Fprintf(out, "%s: %t\n", cs.Bold("Draft"), params["draft"])
+	fmt.Fprintf(out, "%s: %s\n", cs.Bold("Base"), params["baseRefName"])
+	fmt.Fprintf(out, "%s: %s\n", cs.Bold("Head"), params["headRefName"])
 	if len(state.Labels) != 0 {
-		fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Labels"), strings.Join(state.Labels, ", "))
+		fmt.Fprintf(out, "%s: %s\n", cs.Bold("Labels"), strings.Join(state.Labels, ", "))
 	}
 	if len(state.Reviewers) != 0 {
-		fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Reviewers"), strings.Join(state.Reviewers, ", "))
+		fmt.Fprintf(out, "%s: %s\n", cs.Bold("Reviewers"), strings.Join(state.Reviewers, ", "))
 	}
 	if len(state.Assignees) != 0 {
-		fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Assignees"), strings.Join(state.Assignees, ", "))
+		fmt.Fprintf(out, "%s: %s\n", cs.Bold("Assignees"), strings.Join(state.Assignees, ", "))
 	}
 	if len(state.Milestones) != 0 {
-		fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Milestones"), strings.Join(state.Milestones, ", "))
+		fmt.Fprintf(out, "%s: %s\n", cs.Bold("Milestones"), strings.Join(state.Milestones, ", "))
 	}
 	if len(state.Projects) != 0 {
-		fmt.Fprintf(out, "%s: %s\n", iofmt.Bold("Projects"), strings.Join(state.Projects, ", "))
+		fmt.Fprintf(out, "%s: %s\n", cs.Bold("Projects"), strings.Join(state.Projects, ", "))
 	}
-	fmt.Fprintf(out, "%s: %t\n", iofmt.Bold("MaintainerCanModify"), params["maintainerCanModify"])
+	fmt.Fprintf(out, "%s: %t\n", cs.Bold("MaintainerCanModify"), params["maintainerCanModify"])
 
-	fmt.Fprintf(out, "%s\n", iofmt.Bold("Body:"))
+	fmt.Fprintf(out, "%s\n", cs.Bold("Body:"))
 	// Body
 	var md string
 	var err error
 	if len(params["body"].(string)) == 0 {
-		md = fmt.Sprintf("%s\n", iofmt.Gray("No description provided"))
+		md = fmt.Sprintf("%s\n", cs.Muted("No description provided"))
 	} else {
 		md, err = markdown.Render(params["body"].(string),
 			markdown.WithTheme(io.TerminalTheme()),
@@ -935,6 +935,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 	headRepo := ctx.HeadRepo
 	headRemote := ctx.HeadRemote
 	client := ctx.Client
+	gitClient := ctx.GitClient
 
 	var err error
 	// if a head repository could not be determined so far, automatically create
@@ -976,7 +977,8 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 		headRepoURL := ghrepo.FormatRemoteURL(headRepo, cloneProtocol)
 		gitClient := ctx.GitClient
 		origin, _ := remotes.FindByName("origin")
-		upstream, _ := remotes.FindByName("upstream")
+		upstreamName := "upstream"
+		upstream, _ := remotes.FindByName(upstreamName)
 		remoteName := "origin"
 
 		if origin != nil {
@@ -984,7 +986,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 		}
 
 		if origin != nil && upstream == nil && ghrepo.IsSame(origin, ctx.BaseRepo) {
-			renameCmd, err := gitClient.Command(context.Background(), "remote", "rename", "origin", "upstream")
+			renameCmd, err := gitClient.Command(context.Background(), "remote", "rename", "origin", upstreamName)
 			if err != nil {
 				return err
 			}
@@ -992,7 +994,7 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 				return fmt.Errorf("error renaming origin remote: %w", err)
 			}
 			remoteName = "origin"
-			fmt.Fprintf(opts.IO.ErrOut, "Changed %s remote to %q\n", ghrepo.FullName(ctx.BaseRepo), "upstream")
+			fmt.Fprintf(opts.IO.ErrOut, "Changed %s remote to %q\n", ghrepo.FullName(ctx.BaseRepo), upstreamName)
 		}
 
 		gitRemote, err := gitClient.AddRemote(context.Background(), remoteName, headRepoURL, []string{})
@@ -1001,6 +1003,19 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 		}
 
 		fmt.Fprintf(opts.IO.ErrOut, "Added %s as remote %q\n", ghrepo.FullName(headRepo), remoteName)
+
+		// Only mark `upstream` remote as default if `gh pr create` created the remote.
+		if didForkRepo {
+			err := gitClient.SetRemoteResolution(context.Background(), upstreamName, "base")
+			if err != nil {
+				return fmt.Errorf("error setting upstream as default: %w", err)
+			}
+
+			if opts.IO.IsStdoutTTY() {
+				cs := opts.IO.ColorScheme()
+				fmt.Fprintf(opts.IO.ErrOut, "%s Repository %s set as the default repository. To learn more about the default repository, run: gh repo set-default --help\n", cs.WarningIcon(), cs.Bold(ghrepo.FullName(headRepo)))
+			}
+		}
 
 		headRemote = &ghContext.Remote{
 			Remote: gitRemote,
@@ -1013,7 +1028,6 @@ func handlePush(opts CreateOptions, ctx CreateContext) error {
 		pushBranch := func() error {
 			w := NewRegexpWriter(opts.IO.ErrOut, gitPushRegexp, "")
 			defer w.Flush()
-			gitClient := ctx.GitClient
 			ref := fmt.Sprintf("HEAD:refs/heads/%s", ctx.HeadBranch)
 			bo := backoff.NewConstantBackOff(2 * time.Second)
 			ctx := context.Background()
