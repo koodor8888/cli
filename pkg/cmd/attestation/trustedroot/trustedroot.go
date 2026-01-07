@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/cli/cli/v2/pkg/cmd/attestation/api"
@@ -36,8 +37,6 @@ func NewTrustedRootCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Com
 		Args:  cobra.ExactArgs(0),
 		Short: "Output trusted_root.jsonl contents, likely for offline verification",
 		Long: heredoc.Docf(`
-			### NOTE: This feature is currently in public preview, and subject to change.
-
 			Output contents for a trusted_root.jsonl file, likely for offline verification.
 
 			When using %[1]sgh attestation verify%[1]s, if your machine is on the internet,
@@ -68,6 +67,10 @@ func NewTrustedRootCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Com
 				return err
 			}
 
+			hc, err := f.HttpClient()
+			if err != nil {
+				return err
+			}
 			if ghauth.IsTenancy(opts.Hostname) {
 				c, err := f.Config()
 				if err != nil {
@@ -76,11 +79,6 @@ func NewTrustedRootCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Com
 
 				if !c.Authentication().HasActiveToken(opts.Hostname) {
 					return fmt.Errorf("not authenticated with %s", opts.Hostname)
-				}
-
-				hc, err := f.HttpClient()
-				if err != nil {
-					return err
 				}
 				logger := io.NewHandler(f.IOStreams)
 				apiClient := api.NewLiveClient(hc, opts.Hostname, logger)
@@ -95,7 +93,7 @@ func NewTrustedRootCmd(f *cmdutil.Factory, runF func(*Options) error) *cobra.Com
 				return runF(opts)
 			}
 
-			if err := getTrustedRoot(tuf.New, opts); err != nil {
+			if err := getTrustedRoot(tuf.New, opts, hc); err != nil {
 				return fmt.Errorf("Failed to verify the TUF repository: %w", err)
 			}
 
@@ -118,11 +116,11 @@ type tufConfig struct {
 	targets    []string
 }
 
-func getTrustedRoot(makeTUF tufClientInstantiator, opts *Options) error {
+func getTrustedRoot(makeTUF tufClientInstantiator, opts *Options, hc *http.Client) error {
 	var tufOptions []tufConfig
 	var defaultTR = "trusted_root.json"
 
-	tufOpt := verification.DefaultOptionsWithCacheSetting(o.None[string]())
+	tufOpt := verification.DefaultOptionsWithCacheSetting(o.None[string](), hc)
 	// Disable local caching, so we get up-to-date response from TUF repository
 	tufOpt.CacheValidity = 0
 
@@ -151,7 +149,7 @@ func getTrustedRoot(makeTUF tufClientInstantiator, opts *Options) error {
 			targets:    []string{defaultTR},
 		})
 
-		tufOpt = verification.GitHubTUFOptions(o.None[string]())
+		tufOpt = verification.GitHubTUFOptions(o.None[string](), hc)
 		tufOpt.CacheValidity = 0
 		tufOptions = append(tufOptions, tufConfig{
 			tufOptions: tufOpt,

@@ -10,6 +10,7 @@ We accept pull requests for bug fixes and features where we've discussed the app
 * Open an issue if things aren't working as expected
 * Open an issue to propose a significant change
 * Open an issue to propose a design for an issue labelled [`needs-design` and `help wanted`][needs design and help wanted], following the [proposing a design guidelines](#proposing-a-design) instructions below
+* Open an issue to propose a new community supported `gh` package with details about support and redistribution
 * Mention `@cli/code-reviewers` when an issue you want to work on does not have clear Acceptance Criteria
 * Open a pull request for any issue labelled [`help wanted`][hw] and [`good first issue`][gfi]
 
@@ -17,14 +18,13 @@ We accept pull requests for bug fixes and features where we've discussed the app
 
 * Open a pull request for issues without the `help wanted` label or explicit Acceptance Criteria
 * Expand pull request scope to include changes that are not described in the issue's Acceptance Criteria
-* Add installation instructions specifically for your OS/package manager
 * Open pull requests for any issue marked `core`. These issues require additional context from
   the core CLI team at GitHub and any external pull requests will not be accepted
 
 ## Building the project
 
 Prerequisites:
-- Go 1.23+
+- Go 1.25+
 
 Build with:
 * Unix-like systems: `make`
@@ -86,5 +86,5 @@ A member of the core team will [triage](../docs/triage.md) the design proposal. 
 [How to Contribute to Open Source]: https://opensource.guide/how-to-contribute/
 [Using Pull Requests]: https://docs.github.com/en/free-pro-team@latest/github/collaborating-with-issues-and-pull-requests/about-pull-requests
 [GitHub Help]: https://docs.github.com/
-[CLI Design System]: https://primer.style/cli/
+[CLI Design System]: /docs/primer/
 [Google Docs Template]: https://docs.google.com/document/d/1JIRErIUuJ6fTgabiFYfCH3x91pyHuytbfa0QLnTfXKM/edit#heading=h.or54sa47ylpg

@@ -130,6 +130,26 @@ func Test_NewCmdLogin(t *testing.T) {
 			},
 		},
 		{
+			name:     "tty web and clipboard",
+			stdinTTY: true,
+			cli:      "--web --clipboard",
+			wants: LoginOptions{
+				Hostname:    "github.com",
+				Web:         true,
+				Interactive: true,
+				Clipboard:   true,
+			},
+		},
+		{
+			name: "nontty web and clipboard",
+			cli:  "--web --clipboard",
+			wants: LoginOptions{
+				Hostname:  "github.com",
+				Web:       true,
+				Clipboard: true,
+			},
+		},
+		{
 			name:     "tty web",
 			stdinTTY: true,
 			cli:      "--web",
@@ -273,6 +293,7 @@ func Test_NewCmdLogin(t *testing.T) {
 			assert.Equal(t, tt.wants.Web, gotOpts.Web)
 			assert.Equal(t, tt.wants.Interactive, gotOpts.Interactive)
 			assert.Equal(t, tt.wants.Scopes, gotOpts.Scopes)
+			assert.Equal(t, tt.wants.Clipboard, gotOpts.Clipboard)
 		})
 	}
 }
@@ -460,6 +481,9 @@ func Test_loginRun_nontty(t *testing.T) {
 			reg := &httpmock.Registry{}
 			defer reg.Verify(t)
 			tt.opts.HttpClient = func() (*http.Client, error) {
+				return &http.Client{Transport: reg}, nil
+			}
+			tt.opts.PlainHttpClient = func() (*http.Client, error) {
 				return &http.Client{Transport: reg}, nil
 			}
 			if tt.httpStubs != nil {
@@ -752,6 +776,9 @@ func Test_loginRun_Survey(t *testing.T) {
 
 			reg := &httpmock.Registry{}
 			tt.opts.HttpClient = func() (*http.Client, error) {
+				return &http.Client{Transport: reg}, nil
+			}
+			tt.opts.PlainHttpClient = func() (*http.Client, error) {
 				return &http.Client{Transport: reg}, nil
 			}
 			if tt.httpStubs != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
 	"github.com/cli/cli/v2/internal/browser"
+	fd "github.com/cli/cli/v2/internal/featuredetection"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/text"
 	"github.com/cli/cli/v2/pkg/cmd/pr/shared"
@@ -22,6 +23,9 @@ import (
 type ViewOptions struct {
 	IO      *iostreams.IOStreams
 	Browser browser.Browser
+	// TODO projectsV1Deprecation
+	// Remove this detector since it is only used for test validation.
+	Detector fd.Detector
 
 	Finder   shared.PRFinder
 	Exporter cmdutil.Exporter
@@ -81,7 +85,7 @@ var defaultFields = []string{
 	"url", "number", "title", "state", "body", "author", "autoMergeRequest",
 	"isDraft", "maintainerCanModify", "mergeable", "additions", "deletions", "commitsCount",
 	"baseRefName", "headRefName", "headRepositoryOwner", "headRepository", "isCrossRepository",
-	"reviewRequests", "reviews", "assignees", "labels", "projectCards", "milestone",
+	"reviewRequests", "reviews", "assignees", "labels", "projectCards", "projectItems", "milestone",
 	"comments", "reactionGroups", "createdAt", "statusCheckRollup",
 }
 
@@ -89,6 +93,7 @@ func viewRun(opts *ViewOptions) error {
 	findOptions := shared.FindOptions{
 		Selector: opts.SelectorArg,
 		Fields:   defaultFields,
+		Detector: opts.Detector,
 	}
 	if opts.BrowserMode {
 		findOptions.Fields = []string{"url"}
@@ -434,11 +439,23 @@ func prLabelList(pr api.PullRequest, cs *iostreams.ColorScheme) string {
 }
 
 func prProjectList(pr api.PullRequest) string {
-	if len(pr.ProjectCards.Nodes) == 0 {
+	totalCount := pr.ProjectCards.TotalCount + pr.ProjectItems.TotalCount
+	count := len(pr.ProjectCards.Nodes) + len(pr.ProjectItems.Nodes)
+
+	if count == 0 {
 		return ""
 	}
 
 	projectNames := make([]string, 0, len(pr.ProjectCards.Nodes))
+
+	for _, project := range pr.ProjectItems.Nodes {
+		colName := project.Status.Name
+		if colName == "" {
+			colName = "No Status"
+		}
+		projectNames = append(projectNames, fmt.Sprintf("%s (%s)", project.Project.Title, colName))
+	}
+
 	for _, project := range pr.ProjectCards.Nodes {
 		if project == nil {
 			continue
@@ -451,7 +468,7 @@ func prProjectList(pr api.PullRequest) string {
 	}
 
 	list := strings.Join(projectNames, ", ")
-	if pr.ProjectCards.TotalCount > len(pr.ProjectCards.Nodes) {
+	if totalCount > count {
 		list += ", …"
 	}
 	return list

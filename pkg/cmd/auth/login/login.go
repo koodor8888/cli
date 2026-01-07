@@ -20,12 +20,13 @@ import (
 )
 
 type LoginOptions struct {
-	IO         *iostreams.IOStreams
-	Config     func() (gh.Config, error)
-	HttpClient func() (*http.Client, error)
-	GitClient  *git.Client
-	Prompter   shared.Prompt
-	Browser    browser.Browser
+	IO              *iostreams.IOStreams
+	Config          func() (gh.Config, error)
+	HttpClient      func() (*http.Client, error)
+	PlainHttpClient func() (*http.Client, error)
+	GitClient       *git.Client
+	Prompter        shared.Prompt
+	Browser         browser.Browser
 
 	MainExecutable string
 
@@ -38,16 +39,18 @@ type LoginOptions struct {
 	GitProtocol      string
 	InsecureStorage  bool
 	SkipSSHKeyPrompt bool
+	Clipboard        bool
 }
 
 func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Command {
 	opts := &LoginOptions{
-		IO:         f.IOStreams,
-		Config:     f.Config,
-		HttpClient: f.HttpClient,
-		GitClient:  f.GitClient,
-		Prompter:   f.Prompter,
-		Browser:    f.Browser,
+		IO:              f.IOStreams,
+		Config:          f.Config,
+		HttpClient:      f.HttpClient,
+		PlainHttpClient: f.PlainHttpClient,
+		GitClient:       f.GitClient,
+		Prompter:        f.Prompter,
+		Browser:         f.Browser,
 	}
 
 	var tokenStdin bool
@@ -95,7 +98,10 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 			# Start interactive setup
 			$ gh auth login
 
-			# Authenticate against <github.com> by reading the token from a file
+			# Open a browser to authenticate and copy one-time OAuth code to clipboard
+			$ gh auth login --web --clipboard
+
+			# Authenticate against github.com by reading the token from a file
 			$ gh auth login --with-token < mytoken.txt
 
 			# Authenticate with specific host
@@ -145,6 +151,7 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(*LoginOptions) error) *cobra.Comm
 	cmd.Flags().StringSliceVarP(&opts.Scopes, "scopes", "s", nil, "Additional authentication scopes to request")
 	cmd.Flags().BoolVar(&tokenStdin, "with-token", false, "Read token from standard input")
 	cmd.Flags().BoolVarP(&opts.Web, "web", "w", false, "Open a browser to authenticate")
+	cmd.Flags().BoolVarP(&opts.Clipboard, "clipboard", "c", false, "Copy one-time OAuth device code to clipboard")
 	cmdutil.StringEnumFlag(cmd, &opts.GitProtocol, "git-protocol", "p", "", []string{"ssh", "https"}, "The protocol to use for git operations on this host")
 
 	// secure storage became the default on 2023/4/04; this flag is left as a no-op for backwards compatibility
@@ -185,6 +192,11 @@ func loginRun(opts *LoginOptions) error {
 		return cmdutil.SilentError
 	}
 
+	plainHTTPClient, err := opts.PlainHttpClient()
+	if err != nil {
+		return err
+	}
+
 	httpClient, err := opts.HttpClient()
 	if err != nil {
 		return err
@@ -205,16 +217,17 @@ func loginRun(opts *LoginOptions) error {
 	}
 
 	return shared.Login(&shared.LoginOptions{
-		IO:          opts.IO,
-		Config:      authCfg,
-		HTTPClient:  httpClient,
-		Hostname:    hostname,
-		Interactive: opts.Interactive,
-		Web:         opts.Web,
-		Scopes:      opts.Scopes,
-		GitProtocol: opts.GitProtocol,
-		Prompter:    opts.Prompter,
-		Browser:     opts.Browser,
+		IO:              opts.IO,
+		Config:          authCfg,
+		HTTPClient:      httpClient,
+		PlainHTTPClient: plainHTTPClient,
+		Hostname:        hostname,
+		Interactive:     opts.Interactive,
+		Web:             opts.Web,
+		Scopes:          opts.Scopes,
+		GitProtocol:     opts.GitProtocol,
+		Prompter:        opts.Prompter,
+		Browser:         opts.Browser,
 		CredentialFlow: &shared.GitCredentialFlow{
 			Prompter: opts.Prompter,
 			HelperConfig: &gitcredentials.HelperConfig{
@@ -227,6 +240,7 @@ func loginRun(opts *LoginOptions) error {
 		},
 		SecureStorage:    !opts.InsecureStorage,
 		SkipSSHKeyPrompt: opts.SkipSSHKeyPrompt,
+		CopyToClipboard:  opts.Clipboard,
 	})
 }
 

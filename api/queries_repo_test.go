@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/MakeNowJust/heredoc"
+	"github.com/cli/cli/v2/internal/gh"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/pkg/httpmock"
 	"github.com/stretchr/testify/assert"
@@ -41,11 +43,13 @@ func Test_RepoMetadata(t *testing.T) {
 
 	repo, _ := ghrepo.FromFullName("OWNER/REPO")
 	input := RepoMetadataInput{
-		Assignees:  true,
-		Reviewers:  true,
-		Labels:     true,
-		Projects:   true,
-		Milestones: true,
+		Assignees:     true,
+		Reviewers:     true,
+		TeamReviewers: true,
+		Labels:        true,
+		ProjectsV1:    true,
+		ProjectsV2:    true,
+		Milestones:    true,
 	}
 
 	http.Register(
@@ -161,7 +165,7 @@ func Test_RepoMetadata(t *testing.T) {
 	if err != nil {
 		t.Errorf("error resolving members: %v", err)
 	}
-	if !sliceEqual(memberIDs, expectedMemberIDs) {
+	if !slices.Equal(memberIDs, expectedMemberIDs) {
 		t.Errorf("expected members %v, got %v", expectedMemberIDs, memberIDs)
 	}
 
@@ -170,7 +174,7 @@ func Test_RepoMetadata(t *testing.T) {
 	if err != nil {
 		t.Errorf("error resolving teams: %v", err)
 	}
-	if !sliceEqual(teamIDs, expectedTeamIDs) {
+	if !slices.Equal(teamIDs, expectedTeamIDs) {
 		t.Errorf("expected teams %v, got %v", expectedTeamIDs, teamIDs)
 	}
 
@@ -179,20 +183,20 @@ func Test_RepoMetadata(t *testing.T) {
 	if err != nil {
 		t.Errorf("error resolving labels: %v", err)
 	}
-	if !sliceEqual(labelIDs, expectedLabelIDs) {
+	if !slices.Equal(labelIDs, expectedLabelIDs) {
 		t.Errorf("expected labels %v, got %v", expectedLabelIDs, labelIDs)
 	}
 
 	expectedProjectIDs := []string{"TRIAGEID", "ROADMAPID"}
 	expectedProjectV2IDs := []string{"TRIAGEV2ID", "ROADMAPV2ID", "MONALISAV2ID"}
-	projectIDs, projectV2IDs, err := result.ProjectsToIDs([]string{"triage", "roadmap", "triagev2", "roadmapv2", "monalisav2"})
+	projectIDs, projectV2IDs, err := result.ProjectsTitlesToIDs([]string{"triage", "roadmap", "triagev2", "roadmapv2", "monalisav2"})
 	if err != nil {
 		t.Errorf("error resolving projects: %v", err)
 	}
-	if !sliceEqual(projectIDs, expectedProjectIDs) {
+	if !slices.Equal(projectIDs, expectedProjectIDs) {
 		t.Errorf("expected projects %v, got %v", expectedProjectIDs, projectIDs)
 	}
-	if !sliceEqual(projectV2IDs, expectedProjectV2IDs) {
+	if !slices.Equal(projectV2IDs, expectedProjectV2IDs) {
 		t.Errorf("expected projectsV2 %v, got %v", expectedProjectV2IDs, projectV2IDs)
 	}
 
@@ -211,37 +215,53 @@ func Test_RepoMetadata(t *testing.T) {
 	}
 }
 
-func Test_ProjectsToPaths(t *testing.T) {
-	expectedProjectPaths := []string{"OWNER/REPO/PROJECT_NUMBER", "ORG/PROJECT_NUMBER", "OWNER/REPO/PROJECT_NUMBER_2"}
-	projects := []RepoProject{
-		{ID: "id1", Name: "My Project", ResourcePath: "/OWNER/REPO/projects/PROJECT_NUMBER"},
-		{ID: "id2", Name: "Org Project", ResourcePath: "/orgs/ORG/projects/PROJECT_NUMBER"},
-		{ID: "id3", Name: "Project", ResourcePath: "/orgs/ORG/projects/PROJECT_NUMBER_2"},
+// Test that RepoMetadata only fetches teams if the input specifies it
+func Test_RepoMetadata_TeamsAreConditionallyFetched(t *testing.T) {
+	http := &httpmock.Registry{}
+	client := newTestClient(http)
+	repo, _ := ghrepo.FromFullName("OWNER/REPO")
+	input := RepoMetadataInput{
+		Reviewers:     true,
+		TeamReviewers: false, // Do not fetch teams
 	}
-	projectsV2 := []ProjectV2{
-		{ID: "id4", Title: "My Project V2", ResourcePath: "/OWNER/REPO/projects/PROJECT_NUMBER_2"},
-		{ID: "id5", Title: "Org Project V2", ResourcePath: "/orgs/ORG/projects/PROJECT_NUMBER_3"},
-	}
-	projectNames := []string{"My Project", "Org Project", "My Project V2"}
 
-	projectPaths, err := ProjectsToPaths(projects, projectsV2, projectNames)
-	if err != nil {
-		t.Errorf("error resolving projects: %v", err)
-	}
-	if !sliceEqual(projectPaths, expectedProjectPaths) {
-		t.Errorf("expected projects %v, got %v", expectedProjectPaths, projectPaths)
-	}
+	http.Register(
+		httpmock.GraphQL(`query RepositoryAssignableUsers\b`),
+		httpmock.StringResponse(`
+		{ "data": { "repository": { "assignableUsers": {
+			"nodes": [
+				{ "login": "hubot", "id": "HUBOTID" },
+				{ "login": "MonaLisa", "id": "MONAID" }
+			],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+
+	http.Register(
+		httpmock.GraphQL(`query UserCurrent\b`),
+		httpmock.StringResponse(`
+		  { "data": { "viewer": { "login": "monalisa" } } }
+		`))
+
+	http.Exclude(
+		t,
+		httpmock.GraphQL(`query OrganizationTeamList\b`),
+	)
+
+	_, err := RepoMetadata(client, repo, input)
+	require.NoError(t, err)
 }
 
 func Test_ProjectNamesToPaths(t *testing.T) {
-	http := &httpmock.Registry{}
-	client := newTestClient(http)
+	t.Run("when projectsV1 is supported, requests them", func(t *testing.T) {
+		http := &httpmock.Registry{}
+		client := newTestClient(http)
 
-	repo, _ := ghrepo.FromFullName("OWNER/REPO")
+		repo, _ := ghrepo.FromFullName("OWNER/REPO")
 
-	http.Register(
-		httpmock.GraphQL(`query RepositoryProjectList\b`),
-		httpmock.StringResponse(`
+		http.Register(
+			httpmock.GraphQL(`query RepositoryProjectList\b`),
+			httpmock.StringResponse(`
 		{ "data": { "repository": { "projects": {
 			"nodes": [
 				{ "name": "Cleanup", "id": "CLEANUPID", "resourcePath": "/OWNER/REPO/projects/1" },
@@ -250,9 +270,9 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 			"pageInfo": { "hasNextPage": false }
 		} } } }
 		`))
-	http.Register(
-		httpmock.GraphQL(`query OrganizationProjectList\b`),
-		httpmock.StringResponse(`
+		http.Register(
+			httpmock.GraphQL(`query OrganizationProjectList\b`),
+			httpmock.StringResponse(`
 		{ "data": { "organization": { "projects": {
 			"nodes": [
 				{ "name": "Triage", "id": "TRIAGEID", "resourcePath": "/orgs/ORG/projects/1"  }
@@ -260,9 +280,9 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 			"pageInfo": { "hasNextPage": false }
 		} } } }
 		`))
-	http.Register(
-		httpmock.GraphQL(`query RepositoryProjectV2List\b`),
-		httpmock.StringResponse(`
+		http.Register(
+			httpmock.GraphQL(`query RepositoryProjectV2List\b`),
+			httpmock.StringResponse(`
 		{ "data": { "repository": { "projectsV2": {
 			"nodes": [
 				{ "title": "CleanupV2", "id": "CLEANUPV2ID", "resourcePath": "/OWNER/REPO/projects/3" },
@@ -271,9 +291,9 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 			"pageInfo": { "hasNextPage": false }
 		} } } }
 		`))
-	http.Register(
-		httpmock.GraphQL(`query OrganizationProjectV2List\b`),
-		httpmock.StringResponse(`
+		http.Register(
+			httpmock.GraphQL(`query OrganizationProjectV2List\b`),
+			httpmock.StringResponse(`
 		{ "data": { "organization": { "projectsV2": {
 			"nodes": [
 				{ "title": "TriageV2", "id": "TRIAGEV2ID", "resourcePath": "/orgs/ORG/projects/2"  }
@@ -281,9 +301,9 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 			"pageInfo": { "hasNextPage": false }
 		} } } }
 		`))
-	http.Register(
-		httpmock.GraphQL(`query UserProjectV2List\b`),
-		httpmock.StringResponse(`
+		http.Register(
+			httpmock.GraphQL(`query UserProjectV2List\b`),
+			httpmock.StringResponse(`
 		{ "data": { "viewer": { "projectsV2": {
 			"nodes": [
 				{ "title": "MonalisaV2", "id": "MONALISAV2ID", "resourcePath": "/users/MONALISA/projects/5"  }
@@ -292,111 +312,182 @@ func Test_ProjectNamesToPaths(t *testing.T) {
 		} } } }
 		`))
 
-	projectPaths, err := ProjectNamesToPaths(client, repo, []string{"Triage", "Roadmap", "TriageV2", "RoadmapV2", "MonalisaV2"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	expectedProjectPaths := []string{"ORG/1", "OWNER/REPO/2", "ORG/2", "OWNER/REPO/4", "MONALISA/5"}
-	if !sliceEqual(projectPaths, expectedProjectPaths) {
-		t.Errorf("expected projects paths %v, got %v", expectedProjectPaths, projectPaths)
-	}
-}
-
-func Test_RepoResolveMetadataIDs(t *testing.T) {
-	http := &httpmock.Registry{}
-	client := newTestClient(http)
-
-	repo, _ := ghrepo.FromFullName("OWNER/REPO")
-	input := RepoResolveInput{
-		Assignees: []string{"monalisa", "hubot"},
-		Reviewers: []string{"monalisa", "octocat", "OWNER/core", "/robots"},
-		Labels:    []string{"bug", "help wanted"},
-	}
-
-	expectedQuery := `query RepositoryResolveMetadataIDs {
-u000: user(login:"monalisa"){id,login}
-u001: user(login:"hubot"){id,login}
-u002: user(login:"octocat"){id,login}
-repository(owner:"OWNER",name:"REPO"){
-l000: label(name:"bug"){id,name}
-l001: label(name:"help wanted"){id,name}
-}
-organization(login:"OWNER"){
-t000: team(slug:"core"){id,slug}
-t001: team(slug:"robots"){id,slug}
-}
-}
-`
-	responseJSON := `
-	{ "data": {
-		"u000": { "login": "MonaLisa", "id": "MONAID" },
-		"u001": { "login": "hubot", "id": "HUBOTID" },
-		"u002": { "login": "octocat", "id": "OCTOID" },
-		"repository": {
-			"l000": { "name": "bug", "id": "BUGID" },
-			"l001": { "name": "Help Wanted", "id": "HELPID" }
-		},
-		"organization": {
-			"t000": { "slug": "core", "id": "COREID" },
-			"t001": { "slug": "Robots", "id": "ROBOTID" }
+		projectPaths, err := ProjectTitlesToPaths(client, repo, []string{"Triage", "Roadmap", "TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Supported)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-	} }
-	`
 
-	http.Register(
-		httpmock.GraphQL(`query RepositoryResolveMetadataIDs\b`),
-		httpmock.GraphQLQuery(responseJSON, func(q string, _ map[string]interface{}) {
-			if q != expectedQuery {
-				t.Errorf("expected query %q, got %q", expectedQuery, q)
-			}
-		}))
+		expectedProjectPaths := []string{"ORG/1", "OWNER/REPO/2", "ORG/2", "OWNER/REPO/4", "MONALISA/5"}
+		if !slices.Equal(projectPaths, expectedProjectPaths) {
+			t.Errorf("expected projects paths %v, got %v", expectedProjectPaths, projectPaths)
+		}
+	})
 
-	result, err := RepoResolveMetadataIDs(client, repo, input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	t.Run("when projectsV1 is not supported, does not request them", func(t *testing.T) {
+		http := &httpmock.Registry{}
+		client := newTestClient(http)
 
-	expectedMemberIDs := []string{"MONAID", "HUBOTID", "OCTOID"}
-	memberIDs, err := result.MembersToIDs([]string{"monalisa", "hubot", "octocat"})
-	if err != nil {
-		t.Errorf("error resolving members: %v", err)
-	}
-	if !sliceEqual(memberIDs, expectedMemberIDs) {
-		t.Errorf("expected members %v, got %v", expectedMemberIDs, memberIDs)
-	}
+		repo, _ := ghrepo.FromFullName("OWNER/REPO")
 
-	expectedTeamIDs := []string{"COREID", "ROBOTID"}
-	teamIDs, err := result.TeamsToIDs([]string{"/core", "/robots"})
-	if err != nil {
-		t.Errorf("error resolving teams: %v", err)
-	}
-	if !sliceEqual(teamIDs, expectedTeamIDs) {
-		t.Errorf("expected members %v, got %v", expectedTeamIDs, teamIDs)
-	}
+		http.Exclude(
+			t,
+			httpmock.GraphQL(`query RepositoryProjectList\b`),
+		)
+		http.Exclude(
+			t,
+			httpmock.GraphQL(`query OrganizationProjectList\b`),
+		)
 
-	expectedLabelIDs := []string{"BUGID", "HELPID"}
-	labelIDs, err := result.LabelsToIDs([]string{"bug", "help wanted"})
-	if err != nil {
-		t.Errorf("error resolving labels: %v", err)
-	}
-	if !sliceEqual(labelIDs, expectedLabelIDs) {
-		t.Errorf("expected members %v, got %v", expectedLabelIDs, labelIDs)
-	}
+		http.Register(
+			httpmock.GraphQL(`query RepositoryProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "repository": { "projectsV2": {
+			"nodes": [
+				{ "title": "CleanupV2", "id": "CLEANUPV2ID", "resourcePath": "/OWNER/REPO/projects/3" },
+				{ "title": "RoadmapV2", "id": "ROADMAPV2ID", "resourcePath": "/OWNER/REPO/projects/4" }
+			],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+		http.Register(
+			httpmock.GraphQL(`query OrganizationProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "organization": { "projectsV2": {
+			"nodes": [
+				{ "title": "TriageV2", "id": "TRIAGEV2ID", "resourcePath": "/orgs/ORG/projects/2"  }
+			],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+		http.Register(
+			httpmock.GraphQL(`query UserProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "viewer": { "projectsV2": {
+			"nodes": [
+				{ "title": "MonalisaV2", "id": "MONALISAV2ID", "resourcePath": "/users/MONALISA/projects/5"  }
+			],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+
+		projectPaths, err := ProjectTitlesToPaths(client, repo, []string{"TriageV2", "RoadmapV2", "MonalisaV2"}, gh.ProjectsV1Unsupported)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expectedProjectPaths := []string{"ORG/2", "OWNER/REPO/4", "MONALISA/5"}
+		if !slices.Equal(projectPaths, expectedProjectPaths) {
+			t.Errorf("expected projects paths %v, got %v", expectedProjectPaths, projectPaths)
+		}
+	})
+
+	t.Run("when a project is not found, returns an error", func(t *testing.T) {
+		http := &httpmock.Registry{}
+		client := newTestClient(http)
+
+		repo, _ := ghrepo.FromFullName("OWNER/REPO")
+
+		// No projects found
+		http.Register(
+			httpmock.GraphQL(`query RepositoryProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "repository": { "projectsV2": {
+			"nodes": [],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+		http.Register(
+			httpmock.GraphQL(`query OrganizationProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "organization": { "projectsV2": {
+			"nodes": [],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+		http.Register(
+			httpmock.GraphQL(`query UserProjectV2List\b`),
+			httpmock.StringResponse(`
+		{ "data": { "viewer": { "projectsV2": {
+			"nodes": [],
+			"pageInfo": { "hasNextPage": false }
+		} } } }
+		`))
+
+		_, err := ProjectTitlesToPaths(client, repo, []string{"TriageV2"}, gh.ProjectsV1Unsupported)
+		require.Equal(t, err, fmt.Errorf("'TriageV2' not found"))
+	})
 }
 
-func sliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
+func TestMembersToIDs(t *testing.T) {
+	t.Parallel()
 
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+	t.Run("finds ids in assignable users", func(t *testing.T) {
+		t.Parallel()
+
+		repoMetadataResult := RepoMetadataResult{
+			AssignableUsers: []AssignableUser{
+				NewAssignableUser("MONAID", "monalisa", ""),
+				NewAssignableUser("MONAID2", "monalisa2", ""),
+			},
+			AssignableActors: []AssignableActor{
+				NewAssignableBot("HUBOTID", "hubot"),
+			},
 		}
-	}
+		ids, err := repoMetadataResult.MembersToIDs([]string{"monalisa"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"MONAID"}, ids)
+	})
 
-	return true
+	t.Run("finds ids by assignable actor logins", func(t *testing.T) {
+		t.Parallel()
+
+		repoMetadataResult := RepoMetadataResult{
+			AssignableActors: []AssignableActor{
+				NewAssignableBot("HUBOTID", "hubot"),
+				NewAssignableUser("MONAID", "monalisa", ""),
+			},
+		}
+		ids, err := repoMetadataResult.MembersToIDs([]string{"monalisa"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"MONAID"}, ids)
+	})
+
+	t.Run("finds ids by assignable actor display names", func(t *testing.T) {
+		t.Parallel()
+
+		repoMetadataResult := RepoMetadataResult{
+			AssignableActors: []AssignableActor{
+				NewAssignableUser("MONAID", "monalisa", "mona"),
+			},
+		}
+		ids, err := repoMetadataResult.MembersToIDs([]string{"monalisa (mona)"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"MONAID"}, ids)
+	})
+
+	t.Run("when a name appears in both assignable users and actors, the id is only returned once", func(t *testing.T) {
+		t.Parallel()
+
+		repoMetadataResult := RepoMetadataResult{
+			AssignableUsers: []AssignableUser{
+				NewAssignableUser("MONAID", "monalisa", ""),
+			},
+			AssignableActors: []AssignableActor{
+				NewAssignableUser("MONAID", "monalisa", ""),
+			},
+		}
+		ids, err := repoMetadataResult.MembersToIDs([]string{"monalisa"})
+		require.NoError(t, err)
+		require.Equal(t, []string{"MONAID"}, ids)
+	})
+
+	t.Run("when id is not found, returns an error", func(t *testing.T) {
+		t.Parallel()
+
+		repoMetadataResult := RepoMetadataResult{}
+		_, err := repoMetadataResult.MembersToIDs([]string{"monalisa"})
+		require.Error(t, err)
+	})
 }
 
 func Test_RepoMilestones(t *testing.T) {
@@ -450,17 +541,17 @@ func Test_RepoMilestones(t *testing.T) {
 func TestDisplayName(t *testing.T) {
 	tests := []struct {
 		name     string
-		assignee RepoAssignee
+		assignee AssignableUser
 		want     string
 	}{
 		{
 			name:     "assignee with name",
-			assignee: RepoAssignee{"123", "octocat123", "Octavious Cath"},
+			assignee: AssignableUser{"123", "octocat123", "Octavious Cath"},
 			want:     "octocat123 (Octavious Cath)",
 		},
 		{
 			name:     "assignee without name",
-			assignee: RepoAssignee{"123", "octocat123", ""},
+			assignee: AssignableUser{"123", "octocat123", ""},
 			want:     "octocat123",
 		},
 	}

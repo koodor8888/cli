@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/cli/cli/v2/api"
@@ -32,15 +33,16 @@ func New(appVersion string) *cmdutil.Factory {
 		ExecutableName: "gh",
 	}
 
-	f.IOStreams = ioStreams(f)                   // Depends on Config
-	f.HttpClient = httpClientFunc(f, appVersion) // Depends on Config, IOStreams, and appVersion
-	f.GitClient = newGitClient(f)                // Depends on IOStreams, and Executable
-	f.Remotes = remotesFunc(f)                   // Depends on Config, and GitClient
-	f.BaseRepo = BaseRepoFunc(f)                 // Depends on Remotes
-	f.Prompter = newPrompter(f)                  // Depends on Config and IOStreams
-	f.Browser = newBrowser(f)                    // Depends on Config, and IOStreams
-	f.ExtensionManager = extensionManager(f)     // Depends on Config, HttpClient, and IOStreams
-	f.Branch = branchFunc(f)                     // Depends on GitClient
+	f.IOStreams = ioStreams(f)                             // Depends on Config
+	f.HttpClient = httpClientFunc(f, appVersion)           // Depends on Config, IOStreams, and appVersion
+	f.PlainHttpClient = plainHttpClientFunc(f, appVersion) // Depends on IOStreams, and appVersion
+	f.GitClient = newGitClient(f)                          // Depends on IOStreams, and Executable
+	f.Remotes = remotesFunc(f)                             // Depends on Config, and GitClient
+	f.BaseRepo = BaseRepoFunc(f)                           // Depends on Remotes
+	f.Prompter = newPrompter(f)                            // Depends on Config and IOStreams
+	f.Browser = newBrowser(f)                              // Depends on Config, and IOStreams
+	f.ExtensionManager = extensionManager(f)               // Depends on Config, HttpClient, and IOStreams
+	f.Branch = branchFunc(f)                               // Depends on GitClient
 
 	return f
 }
@@ -206,6 +208,24 @@ func httpClientFunc(f *cmdutil.Factory, appVersion string) func() (*http.Client,
 	}
 }
 
+func plainHttpClientFunc(f *cmdutil.Factory, appVersion string) func() (*http.Client, error) {
+	return func() (*http.Client, error) {
+		io := f.IOStreams
+		opts := api.HTTPClientOptions{
+			Log:         io.ErrOut,
+			LogColorize: io.ColorEnabled(),
+			AppVersion:  appVersion,
+			// This is required to prevent automatic setting of auth and other headers.
+			SkipDefaultHeaders: true,
+		}
+		client, err := api.NewHTTPClient(opts)
+		if err != nil {
+			return nil, err
+		}
+		return client, nil
+	}
+}
+
 func newGitClient(f *cmdutil.Factory) *git.Client {
 	io := f.IOStreams
 	ghPath := f.Executable()
@@ -226,7 +246,7 @@ func newBrowser(f *cmdutil.Factory) browser.Browser {
 func newPrompter(f *cmdutil.Factory) prompter.Prompter {
 	editor, _ := cmdutil.DetermineEditor(f.Config)
 	io := f.IOStreams
-	return prompter.New(editor, io.In, io.Out, io.ErrOut)
+	return prompter.New(editor, io)
 }
 
 func configFunc() func() (gh.Config, error) {
@@ -281,6 +301,26 @@ func ioStreams(f *cmdutil.Factory) *iostreams.IOStreams {
 		io.SetNeverPrompt(true)
 	} else if prompt := cfg.Prompt(""); prompt.Value == "disabled" {
 		io.SetNeverPrompt(true)
+	}
+
+	falseyValues := []string{"false", "0", "no", ""}
+
+	accessiblePrompterValue, accessiblePrompterIsSet := os.LookupEnv("GH_ACCESSIBLE_PROMPTER")
+	if accessiblePrompterIsSet {
+		if !slices.Contains(falseyValues, accessiblePrompterValue) {
+			io.SetAccessiblePrompterEnabled(true)
+		}
+	} else if prompt := cfg.AccessiblePrompter(""); prompt.Value == "enabled" {
+		io.SetAccessiblePrompterEnabled(true)
+	}
+
+	ghSpinnerDisabledValue, ghSpinnerDisabledIsSet := os.LookupEnv("GH_SPINNER_DISABLED")
+	if ghSpinnerDisabledIsSet {
+		if !slices.Contains(falseyValues, ghSpinnerDisabledValue) {
+			io.SetSpinnerDisabled(true)
+		}
+	} else if spinnerDisabled := cfg.Spinner(""); spinnerDisabled.Value == "disabled" {
+		io.SetSpinnerDisabled(true)
 	}
 
 	// Pager precedence

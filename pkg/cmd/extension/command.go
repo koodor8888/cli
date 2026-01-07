@@ -12,6 +12,7 @@ import (
 	"github.com/MakeNowJust/heredoc"
 	"github.com/cli/cli/v2/api"
 	"github.com/cli/cli/v2/git"
+	"github.com/cli/cli/v2/internal/featuredetection"
 	"github.com/cli/cli/v2/internal/ghrepo"
 	"github.com/cli/cli/v2/internal/tableprinter"
 	"github.com/cli/cli/v2/internal/text"
@@ -164,7 +165,8 @@ func NewCmdExtension(f *cmdutil.Factory) *cobra.Command {
 					query.Qualifiers = qualifiers
 
 					host, _ := cfg.Authentication().DefaultHost()
-					searcher := search.NewSearcher(client, host)
+					detector := featuredetection.NewDetector(client, host)
+					searcher := search.NewSearcher(client, host, detector)
 
 					if webMode {
 						url := searcher.URL(query)
@@ -300,7 +302,7 @@ func NewCmdExtension(f *cmdutil.Factory) *cobra.Command {
 
 					For GitHub repositories, the repository argument can be specified in
 					%[1]sOWNER/REPO%[1]s format or as a full repository URL.
-					The URL format is useful when the repository is not hosted on <github.com>.
+					The URL format is useful when the repository is not hosted on %[1]sgithub.com%[1]s.
 
 					For remote repositories, the GitHub CLI first looks for the release artifacts assuming
 					that it's a binary extension i.e. prebuilt binaries provided as part of the release.
@@ -507,7 +509,8 @@ func NewCmdExtension(f *cmdutil.Factory) *cobra.Command {
 						return err
 					}
 
-					searcher := search.NewSearcher(api.NewCachedHTTPClient(client, time.Hour*24), host)
+					detector := featuredetection.NewDetector(client, host)
+					searcher := search.NewSearcher(api.NewCachedHTTPClient(client, time.Hour*24), host, detector)
 
 					gc.Stderr = gio.Discard
 

@@ -82,8 +82,9 @@ func ProjectsV2ItemsForIssue(client *Client, repo ghrepo.Interface, issue *Issue
 		Repository struct {
 			Issue struct {
 				ProjectItems struct {
-					Nodes    []*projectV2Item
-					PageInfo struct {
+					TotalCount int
+					Nodes      []*projectV2Item
+					PageInfo   struct {
 						HasNextPage bool
 						EndCursor   string
 					}
@@ -105,6 +106,9 @@ func ProjectsV2ItemsForIssue(client *Client, repo ghrepo.Interface, issue *Issue
 			return err
 		}
 		for _, projectItemNode := range query.Repository.Issue.ProjectItems.Nodes {
+			if projectItemNode == nil {
+				continue
+			}
 			items.Nodes = append(items.Nodes, &ProjectV2Item{
 				ID: projectItemNode.ID,
 				Project: ProjectV2ItemProject{
@@ -149,8 +153,9 @@ func ProjectsV2ItemsForPullRequest(client *Client, repo ghrepo.Interface, pr *Pu
 		Repository struct {
 			PullRequest struct {
 				ProjectItems struct {
-					Nodes    []*projectV2Item
-					PageInfo struct {
+					TotalCount int
+					Nodes      []*projectV2Item
+					PageInfo   struct {
 						HasNextPage bool
 						EndCursor   string
 					}
@@ -173,6 +178,9 @@ func ProjectsV2ItemsForPullRequest(client *Client, repo ghrepo.Interface, pr *Pu
 		}
 
 		for _, projectItemNode := range query.Repository.PullRequest.ProjectItems.Nodes {
+			if projectItemNode == nil {
+				continue
+			}
 			items.Nodes = append(items.Nodes, &ProjectV2Item{
 				ID: projectItemNode.ID,
 				Project: ProjectV2ItemProject{

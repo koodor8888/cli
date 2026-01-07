@@ -3,6 +3,7 @@ package shared
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -19,10 +20,12 @@ import (
 )
 
 type GistFile struct {
-	Filename string `json:"filename,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Language string `json:"language,omitempty"`
-	Content  string `json:"content"`
+	Filename  string `json:"filename,omitempty"`
+	Type      string `json:"type,omitempty"`
+	Language  string `json:"language,omitempty"`
+	Content   string `json:"content"`
+	RawURL    string `json:"raw_url,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 type GistOwner struct {
@@ -43,6 +46,9 @@ func (g Gist) Filename() string {
 	filenames := make([]string, 0, len(g.Files))
 	for fn := range g.Files {
 		filenames = append(filenames, fn)
+	}
+	if len(filenames) == 0 {
+		return ""
 	}
 	sort.Strings(filenames)
 	return filenames[0]
@@ -240,4 +246,30 @@ func PromptGists(prompter prompter.Prompter, client *http.Client, host string, c
 	}
 
 	return &gists[result], nil
+}
+
+func GetRawGistFile(httpClient *http.Client, rawURL string) (string, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", api.HandleHTTPError(resp)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		return "", err
+	}
+
+	return string(body), nil
 }
